@@ -319,7 +319,7 @@ pub contract SimpleDaoNFT: NonFungibleToken {
         access(account) var extraMetadata: {String: AnyStruct}
         // The groups that this FLOAT Event belongs to (groups
         // are within the FLOATEvents resource)
-        access(account) var votingBalletCollections: {UFix64: Bool}
+        access(account) var votingBalletCollections: @{UFix64: VotingCollection}
         // Who created this FLOAT Event
         pub let addr: Address
         // The image of the FLOAT Event
@@ -440,17 +440,29 @@ pub contract SimpleDaoNFT: NonFungibleToken {
             return nil
         }
 
+        pub fun getVotingBallets(): @{UInt64: SimpleDaoNFT.VotingCollection} {
+            panic("TODO")
+        }
+
+        pub fun castVote(votingCollectionId: UInt64, token: @NonFungibleToken.NFT) {
+            panic("TODO")
+        }
+
+        pub fun createProposal(name: String, description: String, type: String) {
+            panic("TODO")
+        }
+
         /****************** Getting a FLOAT ******************/
 
         // Will not panic if one of the recipients has already claimed.
         // It will just skip them.
-        pub fun batchMint(recipients: [&Collection{NonFungibleToken.CollectionPublic}]) {
-            for recipient in recipients {
-                if self.claimed[recipient.owner!.address] == nil {
-                    self.mint(recipient: recipient)
-                }
-            }
-        }
+        // pub fun batchMint(recipients: [&Collection{NonFungibleToken.CollectionPublic}]) {
+        //     for recipient in recipients {
+        //         if self.claimed[recipient.owner!.address] == nil {
+        //             self.mint(recipient: recipient)
+        //         }
+        //     }
+        // }
 
 
         // Used to give a person a FLOAT from this event.
@@ -462,7 +474,7 @@ pub contract SimpleDaoNFT: NonFungibleToken {
         // run the verifiers on the user. It bypasses all of them.
         //
         // Return the id of the FLOAT it minted
-        pub fun mint(recipient: &Collection{NonFungibleToken.CollectionPublic}): UInt64 {
+        pub fun mint(recipient: &Collection{NonFungibleToken.CollectionPublic}, params: {String: AnyStruct}): UInt64 {
             pre {
                 self.claimed[recipient.owner!.address] == nil:
                     "This person already claimed their FLOAT!"
@@ -471,14 +483,17 @@ pub contract SimpleDaoNFT: NonFungibleToken {
             let serial = self.totalSupply
 
             let token <- create NFT(
-                _eventDescription: self.description,
-                _eventHost: self.host, 
-                _eventId: self.eventId,
-                _eventImage: self.image,
-                _eventName: self.name,
-                _originalRecipient: recipientAddr, 
-                _serial: serial
-            ) 
+                _name: params["name"] as! String,
+                _dateJoined: params["dateJoined"] as! String,
+                _originalRecipient: recipientAddr,
+                _serial: serial,
+                _simpleDaoAddr: self.addr,
+                _simpleDaoName: self.name,
+                _simpleDaoImage: self.image,
+                _simpleDaoDescription: self.description,
+                _simpleDaoId: self.simpleDaoId
+            )
+
             let id = token.id
             // Saves the claimer
             self.claimed[recipientAddr] = TokenIdentifier(
@@ -500,34 +515,34 @@ pub contract SimpleDaoNFT: NonFungibleToken {
         }
 
         access(account) fun verifyAndMint(recipient: &Collection, params: {String: AnyStruct}): UInt64 {
-            params["event"] = &self as &FLOATEvent{FLOATEventPublic}
-            params["claimee"] = recipient.owner!.address
+            // params["event"] = &self as &FLOATEvent{FLOATEventPublic}
+            // params["claimee"] = recipient.owner!.address
             
-            // Runs a loop over all the verifiers that this FLOAT Events
-            // implements. For example, "Limited", "Timelock", "Secret", etc.  
-            // All the verifiers are in the FLOATVerifiers.cdc contract
-            for identifier in self.verifiers.keys {
-                let typedModules = (&self.verifiers[identifier] as &[{IVerifier}]?)!
-                var i = 0
-                while i < typedModules.length {
-                    let verifier = &typedModules[i] as &{IVerifier}
-                    verifier.verify(params)
-                    i = i + 1
-                }
-            }
+            // // Runs a loop over all the verifiers that this FLOAT Events
+            // // implements. For example, "Limited", "Timelock", "Secret", etc.  
+            // // All the verifiers are in the FLOATVerifiers.cdc contract
+            // for identifier in self.verifiers.keys {
+            //     let typedModules = (&self.verifiers[identifier] as &[{IVerifier}]?)!
+            //     var i = 0
+            //     while i < typedModules.length {
+            //         let verifier = &typedModules[i] as &{IVerifier}
+            //         verifier.verify(params)
+            //         i = i + 1
+            //     }
+            // }
 
             // You're good to go.
-            let id = self.mint(recipient: recipient)
+            let id = self.mint(recipient: recipient, params: params)
 
-            emit FLOATClaimed(
-                id: id,
-                eventHost: self.host, 
-                eventId: self.eventId, 
-                eventImage: self.image,
-                eventName: self.name,
-                recipient: recipient.owner!.address,
-                serial: self.totalSupply - 1
-            )
+            // emit FLOATClaimed(
+            //     id: id,
+            //     eventHost: self.host, 
+            //     eventId: self.eventId, 
+            //     eventImage: self.image,
+            //     eventName: self.name,
+            //     recipient: recipient.owner!.address,
+            //     serial: self.totalSupply - 1
+            // )
             return id
         }
 
@@ -540,8 +555,6 @@ pub contract SimpleDaoNFT: NonFungibleToken {
         // be passed in the `params`.
         pub fun claim(recipient: &Collection, params: {String: AnyStruct}) {
             pre {
-                self.getPrices() == nil:
-                    "You need to purchase this FLOAT."
                 self.claimed[recipient.owner!.address] == nil:
                     "This person already claimed their FLOAT!"
                 self.claimable: 
@@ -549,52 +562,6 @@ pub contract SimpleDaoNFT: NonFungibleToken {
             }
             
             self.verifyAndMint(recipient: recipient, params: params)
-        }
- 
-        pub fun purchase(recipient: &Collection, params: {String: AnyStruct}, payment: @FungibleToken.Vault) {
-            pre {
-                self.getPrices() != nil:
-                    "Don't call this function. The FLOAT is free."
-                self.getPrices()![payment.getType().identifier] != nil:
-                    "This FLOAT does not support purchasing in the passed in token."
-                payment.balance == self.getPrices()![payment.getType().identifier]!.price:
-                    "You did not pass in the correct amount of tokens."
-                self.claimed[recipient.owner!.address] == nil:
-                    "This person already claimed their FLOAT!"
-                self.claimable: 
-                    "This FLOATEvent is not claimable, and thus not currently active."
-            }
-            let royalty: UFix64 = 0.05
-            let emeraldCityTreasury: Address = 0x5643fd47a29770e7
-            let paymentType: String = payment.getType().identifier
-            let tokenInfo: TokenInfo = self.getPrices()![paymentType]!
-
-            let EventHostVault = getAccount(self.host).getCapability(tokenInfo.path)
-                                    .borrow<&{FungibleToken.Receiver}>()
-                                    ?? panic("Could not borrow the &{FungibleToken.Receiver} from the event host.")
-
-            assert(
-                EventHostVault.getType().identifier == paymentType,
-                message: "The event host's path is not associated with the intended token."
-            )
-            
-            let EmeraldCityVault = getAccount(emeraldCityTreasury).getCapability(tokenInfo.path)
-                                    .borrow<&{FungibleToken.Receiver}>() 
-                                    ?? panic("Could not borrow the &{FungibleToken.Receiver} from Emerald City's Vault.")
-
-            assert(
-                EmeraldCityVault.getType().identifier == paymentType,
-                message: "Emerald City's path is not associated with the intended token."
-            )
-
-            let emeraldCityCut <- payment.withdraw(amount: payment.balance * royalty)
-
-            EmeraldCityVault.deposit(from: <- emeraldCityCut)
-            EventHostVault.deposit(from: <- payment)
-
-            let id = self.verifyAndMint(recipient: recipient, params: params)
-
-            emit FLOATPurchased(id: id, eventHost: self.host, eventId: self.eventId, recipient: recipient.owner!.address, serial: self.totalSupply - 1)
         }
 
         init (
@@ -606,85 +573,46 @@ pub contract SimpleDaoNFT: NonFungibleToken {
             _name: String,
             _transferrable: Bool,
             _url: String,
-            _verifiers: {String: [{IVerifier}]},
         ) {
             self.claimable = _claimable
             self.claimed = {}
             self.currentHolders = {}
             self.dateCreated = getCurrentBlock().timestamp
             self.description = _description
-            self.eventId = self.uuid
+            self.simpleDaoId = self.uuid
             self.extraMetadata = _extraMetadata
-            self.groups = {}
-            self.host = _host
+            self.addr = _host
             self.image = _image
             self.name = _name
             self.transferrable = _transferrable
             self.totalSupply = 0
             self.url = _url
-            self.verifiers = _verifiers
+            self.votingBalletCollections <- {}
 
-            FLOAT.totalFLOATEvents = FLOAT.totalFLOATEvents + 1
-            emit FLOATEventCreated(eventId: self.eventId, description: self.description, host: self.host, image: self.image, name: self.name, url: self.url)
+            SimpleDaoNFT.totalSimpleDAOs = SimpleDaoNFT.totalSimpleDAOs + 1
+            // emit FLOATEventCreated(eventId: self.eventId, description: self.description, host: self.host, image: self.image, name: self.name, url: self.url)
         }
 
         destroy() {
-            emit FLOATEventDestroyed(eventId: self.eventId, host: self.host, name: self.name)
+            destroy self.votingBalletCollections
+            // emit FLOATEventDestroyed(eventId: self.eventId, host: self.host, name: self.name)
         }
-    }
-
-    // A container of FLOAT Events (maybe because they're similar to
-    // one another, or an event host wants to list all their AMAs together, etc).
-    pub resource Group {
-        pub let id: UInt64
-        pub let name: String
-        pub let image: String
-        pub let description: String
-        // All the FLOAT Events that belong
-        // to this group.
-        access(account) var events: {UInt64: Bool}
-
-        access(account) fun addEvent(eventId: UInt64) {
-            self.events[eventId] = true
-        }
-
-        access(account) fun removeEvent(eventId: UInt64) {
-            self.events.remove(key: eventId)
-        }
-
-        pub fun getEvents(): [UInt64] {
-            return self.events.keys
-        }
-
-        init(_name: String, _image: String, _description: String) {
-            self.id = self.uuid
-            self.name = _name
-            self.image = _image
-            self.description = _description
-            self.events = {}
-        }
-    }
+}
  
     // 
-    // FLOATEvents
+    // SimpleDaos
     //
-    pub resource interface FLOATEventsPublic {
+    pub resource interface SimpleDAOsPublic {
         // Public Getters
-        pub fun borrowPublicEventRef(eventId: UInt64): &FLOATEvent{FLOATEventPublic}?
-        pub fun getAllEvents(): {UInt64: String}
+        pub fun borrowPublicSimpleDaoRef(simpleDaoId: UInt64): &SimpleDAO{SimpleDAOPublic}?
+        pub fun getAllSimpleDAOs(): {UInt64: String}
         pub fun getIDs(): [UInt64]
-        pub fun getGroup(groupName: String): &Group?
-        pub fun getGroups(): [String]
-        // Account Getters
-        access(account) fun borrowEventsRef(): &FLOATEvents
     }
 
     // A "Collection" of FLOAT Events
-    pub resource FLOATEvents: FLOATEventsPublic, MetadataViews.ResolverCollection {
+    pub resource SimpleDAOs: SimpleDAOsPublic, MetadataViews.ResolverCollection {
         // All the FLOAT Events this collection stores
-        access(account) var events: @{UInt64: FLOATEvent}
-        // All the Groups this collection stores
-        access(account) var groups: @{String: Group}
+        access(account) var simpleDAOs: @{UInt64: SimpleDAO}
 
         // Creates a new FLOAT Event by passing in some basic parameters
         // and a list of all the verifiers this event must abide by
@@ -695,21 +623,9 @@ pub contract SimpleDaoNFT: NonFungibleToken {
             name: String, 
             transferrable: Bool,
             url: String,
-            verifiers: [{IVerifier}],
-            _ extraMetadata: {String: AnyStruct},
-            initialGroups: [String]
+            extraMetadata: {String: AnyStruct},
         ): UInt64 {
-            let typedVerifiers: {String: [{IVerifier}]} = {}
-            for verifier in verifiers {
-                let identifier = verifier.getType().identifier
-                if typedVerifiers[identifier] == nil {
-                    typedVerifiers[identifier] = [verifier]
-                } else {
-                    typedVerifiers[identifier]!.append(verifier)
-                }
-            }
-
-            let FLOATEvent <- create FLOATEvent(
+            let SimpleDAO <- create SimpleDAO(
                 _claimable: claimable,
                 _description: description, 
                 _extraMetadata: extraMetadata,
@@ -718,144 +634,50 @@ pub contract SimpleDaoNFT: NonFungibleToken {
                 _name: name, 
                 _transferrable: transferrable,
                 _url: url,
-                _verifiers: typedVerifiers
             )
-            let eventId = FLOATEvent.eventId
-            self.events[eventId] <-! FLOATEvent
+            let simpleDaoId = SimpleDAO.simpleDaoId
+            self.simpleDAOs[simpleDaoId] <-! SimpleDAO
 
-            for groupName in initialGroups {
-                self.addEventToGroup(groupName: groupName, eventId: eventId)
-            }
-            return eventId
+            return simpleDaoId
         }
 
-        // Deletes an event. Also makes sure to remove
-        // the event from all the groups its in.
-        pub fun deleteEvent(eventId: UInt64) {
-            let event <- self.events.remove(key: eventId) ?? panic("This event does not exist")
-            for groupName in event.getGroups() {
-                let groupRef = (&self.groups[groupName] as &Group?)!
-                groupRef.removeEvent(eventId: eventId)
-            }
-            destroy event
-        }
-
-        pub fun createGroup(groupName: String, image: String, description: String) {
-            pre {
-                self.groups[groupName] == nil: "A group with this name already exists."
-            }
-            self.groups[groupName] <-! create Group(_name: groupName, _image: image, _description: description)
-        }
-
-        // Deletes a group. Also makes sure to remove
-        // the group from all the events that use it.
-        pub fun deleteGroup(groupName: String) {
-            let eventsInGroup = self.groups[groupName]?.getEvents() 
-                                ?? panic("This Group does not exist.")
-            for eventId in eventsInGroup {
-                let ref = (&self.events[eventId] as &FLOATEvent?)!
-                ref.removeFromGroup(groupName: groupName)
-            }
-            destroy self.groups.remove(key: groupName)
-        }
-
-        // Adds an event to a group. Also adds the group
-        // to the event.
-        pub fun addEventToGroup(groupName: String, eventId: UInt64) {
-            pre {
-                self.groups[groupName] != nil: "This group does not exist."
-                self.events[eventId] != nil: "This event does not exist."
-            }
-            let groupRef = (&self.groups[groupName] as &Group?)!
-            groupRef.addEvent(eventId: eventId)
-
-            let eventRef = self.borrowEventRef(eventId: eventId)!
-            eventRef.addToGroup(groupName: groupName)
-        }
-
-        // Simply takes the event away from the group
-        pub fun removeEventFromGroup(groupName: String, eventId: UInt64) {
-            pre {
-                self.groups[groupName] != nil: "This group does not exist."
-                self.events[eventId] != nil: "This event does not exist."
-            }
-            let groupRef = (&self.groups[groupName] as &Group?)!
-            groupRef.removeEvent(eventId: eventId)
-
-            let eventRef = self.borrowEventRef(eventId: eventId)!
-            eventRef.removeFromGroup(groupName: groupName)
-        }
-
-        pub fun getGroup(groupName: String): &Group? {
-            return &self.groups[groupName] as &Group?
-        }
-        
-        pub fun getGroups(): [String] {
-            return self.groups.keys
-        }
-
-        // Only accessible to people who share your account. 
-        // If `fromHost` has allowed you to share your account
-        // in the GrantedAccountAccess.cdc contract, you can get a reference
-        // to their FLOATEvents here and do pretty much whatever you want.
-        pub fun borrowSharedRef(fromHost: Address): &FLOATEvents {
-            let sharedInfo = getAccount(fromHost).getCapability(GrantedAccountAccess.InfoPublicPath)
-                                .borrow<&GrantedAccountAccess.Info{GrantedAccountAccess.InfoPublic}>() 
-                                ?? panic("Cannot borrow the InfoPublic from the host")
-            assert(
-                sharedInfo.isAllowed(account: self.owner!.address),
-                message: "This account owner does not share their account with you."
-            )
-            let otherFLOATEvents = getAccount(fromHost).getCapability(FLOAT.FLOATEventsPublicPath)
-                                    .borrow<&FLOATEvents{FLOATEventsPublic}>()
-                                    ?? panic("Could not borrow the public FLOATEvents.")
-            return otherFLOATEvents.borrowEventsRef()
-        }
-
-        // Only used for the above function.
-        access(account) fun borrowEventsRef(): &FLOATEvents {
-            return &self as &FLOATEvents
-        }
-
-        pub fun borrowEventRef(eventId: UInt64): &FLOATEvent? {
-            return &self.events[eventId] as &FLOATEvent?
+        pub fun borrowSimpleDAOsRef(simpleDaoId: UInt64): &SimpleDAO? {
+            return &self.simpleDAOs[simpleDaoId] as &SimpleDAO?
         }
 
         /************* Getters (for anyone) *************/
 
         // Get a public reference to the FLOATEvent
         // so you can call some helpful getters
-        pub fun borrowPublicEventRef(eventId: UInt64): &FLOATEvent{FLOATEventPublic}? {
-            return &self.events[eventId] as &FLOATEvent{FLOATEventPublic}?
+        pub fun borrowPublicSimpleDaoRef(simpleDaoId: UInt64): &SimpleDAO{SimpleDAOPublic}? {
+            return &self.simpleDAOs[simpleDaoId] as &SimpleDAO{SimpleDAOPublic}?
         }
 
         pub fun getIDs(): [UInt64] {
-            return self.events.keys
+            return self.simpleDAOs.keys
         }
 
         // Maps the eventId to the name of that
         // event. Just a kind helper.
-        pub fun getAllEvents(): {UInt64: String} {
+        pub fun getAllSimpleDAOs(): {UInt64: String} {
             let answer: {UInt64: String} = {}
-            for id in self.events.keys {
-                let ref = (&self.events[id] as &FLOATEvent?)!
+            for id in self.simpleDAOs.keys {
+                let ref = (&self.simpleDAOs[id] as &SimpleDAO?)!
                 answer[id] = ref.name
             }
             return answer
         }
 
         pub fun borrowViewResolver(id: UInt64): &{MetadataViews.Resolver} {
-            return (&self.events[id] as &{MetadataViews.Resolver}?)!
+            return (&self.simpleDAOs[id] as &{MetadataViews.Resolver}?)!
         }
 
         init() {
-            self.events <- {}
-            self.groups <- {}
+            self.simpleDAOs <- {}
         }
 
         destroy() {
-            destroy self.events
-            destroy self.groups
+            destroy self.simpleDAOs
         }
     }
 
@@ -863,8 +685,8 @@ pub contract SimpleDaoNFT: NonFungibleToken {
         return <- create Collection()
     }
 
-    pub fun createEmptyFLOATEventCollection(): @FLOATEvents {
-        return <- create FLOATEvents()
+    pub fun createEmptySimpleDAOsCollection(): @SimpleDAOs {
+        return <- create SimpleDAOs()
     }
 
     init() {
